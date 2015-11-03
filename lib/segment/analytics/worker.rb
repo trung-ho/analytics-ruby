@@ -15,15 +15,15 @@ module Segment
       # and makes requests to the segment.io api
       #
       # queue   - Queue synchronized between client and worker
-      # write_key  - String of the project's Write key
+      # app_id  - String of the project's app_id
       # options - Hash of worker options
       #           batch_size - Fixnum of how many items to send in a batch
       #           on_error   - Proc of what to do on an error
       #
-      def initialize(queue, write_key, options = {})
+      def initialize(queue, app_id, options = {})
         symbolize_keys! options
         @queue = queue
-        @write_key = write_key
+        @app_id = app_id
         @batch_size = options[:batch_size] || Queue::BATCH_SIZE
         @on_error = options[:on_error] || Proc.new { |status, error| }
         @batch = []
@@ -42,7 +42,7 @@ module Segment
             end
           end
 
-          res = Request.new.post @write_key, @batch
+          res = Request.new.post @app_id, @batch
 
           @lock.synchronize { @batch.clear }
 

@@ -32,10 +32,10 @@ module Segment
         @http = http
       end
 
-      # public: Posts the write key and batch of messages to the API.
+      # public: Posts the app_id and batch of messages to the API.
       #
       # returns - Response of the status and error if it exists
-      def post(write_key, batch)
+      def post(app_id, batch)
         status, error = nil, nil
         remaining_retries = @retries
         backoff = @backoff
@@ -43,12 +43,12 @@ module Segment
         begin
           payload = JSON.generate :sentAt => datetime_in_iso8601(Time.new), :batch => batch
           request = Net::HTTP::Post.new(@path, headers)
-          request.basic_auth write_key, nil
+          request.basic_auth app_id, nil
 
           if self.class.stub
             status = 200
             error = nil
-            logger.debug "stubbed request to #{@path}: write key = #{write_key}, payload = #{payload}"
+            logger.debug "stubbed request to #{@path}: app id = #{app_id}, payload = #{payload}"
           else
             res = @http.request(request, payload)
             status = res.code.to_i

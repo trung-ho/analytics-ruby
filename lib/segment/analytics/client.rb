@@ -12,20 +12,20 @@ module Segment
       # public: Creates a new client
       #
       # attrs - Hash
-      #           :write_key         - String of your project's write_key
+      #           :app_id         - String of your project's app_id
       #           :max_queue_size - Fixnum of the max calls to remain queued (optional)
       #           :on_error       - Proc which handles error calls from the API
       def initialize attrs = {}
         symbolize_keys! attrs
 
         @queue = Queue.new
-        @write_key = attrs[:write_key]
+        @app_id = attrs[:app_id]
         @max_queue_size = attrs[:max_queue_size] || Defaults::Queue::MAX_SIZE
         @options = attrs
         @worker_mutex = Mutex.new
-        @worker = Worker.new @queue, @write_key, @options
+        @worker = Worker.new @queue, @app_id, @options
 
-        check_write_key!
+        check_app_id!
 
         at_exit { @worker_thread && @worker_thread[:should_exit] = true }
       end
@@ -314,9 +314,9 @@ module Segment
         context[:library] =  { :name => "analytics-ruby", :version => Segment::Analytics::VERSION.to_s }
       end
 
-      # private: Checks that the write_key is properly initialized
-      def check_write_key!
-        fail ArgumentError, 'Write key must be initialized' if @write_key.nil?
+      # private: Checks that the app_id is properly initialized
+      def check_app_id!
+        fail ArgumentError, 'App id must be initialized' if @app_id.nil?
       end
 
       # private: Checks the timstamp option to make sure it is a Time.
