@@ -7,12 +7,12 @@ analytics-ruby is a ruby client for [Astronomer](http://www.astronomer.io), orig
 
 Into Gemfile from rubygems.org:
 ```
-gem 'analytics-ruby', :require => "segment"
+gem 'astronomer', :require => "segment"
 ```
 
 Into environment gems from rubygems.org:
 ```
-gem install 'analytics-ruby'
+gem install 'astronomer'
 ```
 
 ## Usage
@@ -20,7 +20,7 @@ gem install 'analytics-ruby'
 Create an instance of the Analytics object:
 ```
 analytics = Segment::Analytics.new({
-  write_key: 'YOUR_WRITE_KEY'
+  app_id: 'YOUR_APP_ID'
 })
 ```
 
