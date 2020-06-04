@@ -1,3 +1,103 @@
+2.2.8 / 2020-02-10
+==================
+
+  * Promoted pre-release version to stable.
+
+2.2.8.pre / 2019-11-29
+==================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/212): Fix log message
+    for stubbed requests
+  * [Deprecate](https://github.com/segmentio/analytics-ruby/pull/209): Deprecate
+    Ruby <2.0 support
+
+2.2.7 / 2019-05-09
+==================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/188): Allow `anonymous_id`
+    in `#alias` and `#group`.
+
+2.2.6 / 2018-06-11
+==================
+
+  * Promote pre-release version to stable.
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/187): Don't assume
+    all errors are 'ConnectionError's
+
+2.2.6.pre / 2018-06-27
+==================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/168): Revert 'reuse
+    TCP connections' to fix EMFILE errors
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/166): Fix oj/rails
+    conflict
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/162): Add missing
+    'Forwardable' requirement
+  * [Improvement](https://github.com/segmentio/analytics-ruby/pull/163): Better
+    logging
+
+2.2.5 / 2018-05-01
+==================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/158): Require `version` module first.
+
+2.2.4 / 2018-04-30
+==================
+
+  * Promote pre-release version to stable.
+
+2.2.4.pre / 2018-02-04
+======================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/147): Prevent 'batch
+    size exceeded' errors by automatically batching
+    items according to size
+  * [Performance](https://github.com/segmentio/analytics-ruby/pull/149): Reuse
+    TCP connections
+  * [Improvement](https://github.com/segmentio/analytics-ruby/pull/145): Emit logs
+    when in-memory queue is full
+  * [Improvement](https://github.com/segmentio/analytics-ruby/pull/143): Emit logs
+    when messages exceed maximum allowed size
+  * [Improvement](https://github.com/segmentio/analytics-ruby/pull/134): Add
+    exponential backoff to retries
+  * [Improvement](https://github.com/segmentio/analytics-ruby/pull/132): Handle
+    HTTP status code failure appropriately
+
+2.2.3.pre / 2017-09-14
+==================
+
+  * [Fix](https://github.com/segmentio/analytics-ruby/pull/120): Override `respond_to_missing` instead of `respond_to?` to facilitate mock the library in tests.
+
+
+2.2.2 / 2016-08-03
+==================
+
+  * adding commander as dep (for CLI)
+
+2.2.1 / 2016-08-03
+==================
+
+  * add executables to spec
+
+2.2.0 / 2016-08-03
+==================
+
+ * Adding an (experimental) CLI
+
+2.1.0 / 2016-06-17
+==================
+
+ * Fix: Ensure error handler is called before Client#flush finishes.
+ * Feature: Support setting a custom message ID.
+
+2.0.13 / 2015-09-15
+==================
+
+ * readme: updated install docs
+ * fix: page/screen to allow no name
+ * git: ignore ruby version
+ * travis-ci: remove old rubys
+
 2.0.12 / 2015-01-10
 ==================
 

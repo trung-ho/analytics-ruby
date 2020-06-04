@@ -1,8 +1,11 @@
-require 'segment/analytics'
-require 'wrong'
-require 'active_support/time'
+# https://github.com/codecov/codecov-ruby#usage
+require 'simplecov'
+SimpleCov.start
+require 'codecov'
+SimpleCov.formatter = SimpleCov::Formatter::Codecov
 
-include Wrong
+require 'segment/analytics'
+require 'active_support/time'
 
 # Setting timezone for ActiveSupport::TimeWithZone to UTC
 Time.zone = 'UTC'
@@ -21,7 +24,7 @@ module Segment
       }
     }
 
-    IDENTIFY =  {
+    IDENTIFY = {
       :traits => {
         :likes_animals => true,
         :instrument => 'Guitar',
@@ -36,9 +39,7 @@ module Segment
 
     GROUP = {}
 
-    PAGE = {
-      :name => 'home'
-    }
+    PAGE = {}
 
     SCREEN = {
       :name => 'main'
@@ -79,3 +80,61 @@ module Segment
     end
   end
 end
+
+# A worker that doesn't consume jobs
+class NoopWorker
+  def run
+    # Does nothing
+  end
+end
+
+# A worker that consumes all jobs
+class DummyWorker
+  def initialize(queue)
+    @queue = queue
+  end
+
+  def run
+    @queue.pop until @queue.empty?
+  end
+
+  def is_requesting?
+    false
+  end
+end
+
+# A backoff policy that returns a fixed list of values
+class FakeBackoffPolicy
+  def initialize(interval_values)
+    @interval_values = interval_values
+  end
+
+  def next_interval
+    raise 'FakeBackoffPolicy has no values left' if @interval_values.empty?
+    @interval_values.shift
+  end
+end
+
+# usage:
+# it "should return a result of 5" do
+#   eventually(options: {timeout: 1}) { long_running_thing.result.should eq(5) }
+# end
+
+module AsyncHelper
+  def eventually(options = {})
+    timeout = options[:timeout] || 2
+    interval = options[:interval] || 0.1
+    time_limit = Time.now + timeout
+    loop do
+      begin
+        yield
+        return
+      rescue RSpec::Expectations::ExpectationNotMetError => error
+        raise error if Time.now >= time_limit
+        sleep interval
+      end
+    end
+  end
+end
+
+include AsyncHelper

@@ -3,7 +3,12 @@ require 'spec_helper'
 module Segment
   class Analytics
     describe Client do
-      let(:client) { Client.new :write_key => WRITE_KEY }
+      let(:client) do
+        Client.new(:write_key => WRITE_KEY).tap { |client|
+          # Ensure that worker doesn't consume items from the queue
+          client.instance_variable_set(:@worker, NoopWorker.new)
+        }
+      end
       let(:queue) { client.instance_variable_get :@queue }
 
       describe '#initialize' do
@@ -38,13 +43,13 @@ module Segment
             client.track({
               :user_id => 'user',
               :event => 'Event',
-              :properties => [1,2,3]
+              :properties => [1, 2, 3]
             })
           }.to raise_error(ArgumentError)
         end
 
         it 'uses the timestamp given' do
-          time = Time.parse("1990-07-16 13:30:00.123 UTC")
+          time = Time.parse('1990-07-16 13:30:00.123 UTC')
 
           client.track({
             :event => 'testing the timestamp',
@@ -71,28 +76,33 @@ module Segment
           end.to_not raise_error
         end
 
-        it 'converts time and date traits into iso8601 format' do
+        it 'converts time and date properties into iso8601 format' do
           client.track({
             :user_id => 'user',
             :event => 'Event',
             :properties => {
               :time => Time.utc(2013),
-              :time_with_zone =>  Time.zone.parse('2013-01-01'),
-              :date_time => DateTime.new(2013,1,1),
-              :date => Date.new(2013,1,1),
+              :time_with_zone => Time.zone.parse('2013-01-01'),
+              :date_time => DateTime.new(2013, 1, 1),
+              :date => Date.new(2013, 1, 1),
               :nottime => 'x'
             }
           })
-          message = queue.pop
 
-          expect(message[:properties][:time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:properties][:time_with_zone]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:properties][:date_time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:properties][:date]).to eq('2013-01-01')
-          expect(message[:properties][:nottime]).to eq('x')
+          message = queue.pop
+          properties = message[:properties]
+
+          date_time = DateTime.new(2013, 1, 1)
+          expect(Time.iso8601(properties[:time])).to eq(date_time)
+          expect(Time.iso8601(properties[:time_with_zone])).to eq(date_time)
+          expect(Time.iso8601(properties[:date_time])).to eq(date_time)
+
+          date = Date.new(2013, 1, 1)
+          expect(Date.iso8601(properties[:date])).to eq(date)
+
+          expect(properties[:nottime]).to eq('x')
         end
       end
-
 
       describe '#identify' do
         it 'errors without any user id' do
@@ -119,19 +129,24 @@ module Segment
             :traits => {
               :time => Time.utc(2013),
               :time_with_zone =>  Time.zone.parse('2013-01-01'),
-              :date_time => DateTime.new(2013,1,1),
-              :date => Date.new(2013,1,1),
+              :date_time => DateTime.new(2013, 1, 1),
+              :date => Date.new(2013, 1, 1),
               :nottime => 'x'
             }
           })
 
           message = queue.pop
+          traits = message[:traits]
 
-          expect(message[:traits][:time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:time_with_zone]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:date_time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:date]).to eq('2013-01-01')
-          expect(message[:traits][:nottime]).to eq('x')
+          date_time = DateTime.new(2013, 1, 1)
+          expect(Time.iso8601(traits[:time])).to eq(date_time)
+          expect(Time.iso8601(traits[:time_with_zone])).to eq(date_time)
+          expect(Time.iso8601(traits[:date_time])).to eq(date_time)
+
+          date = Date.new(2013, 1, 1)
+          expect(Date.iso8601(traits[:date])).to eq(date)
+
+          expect(traits[:nottime]).to eq('x')
         end
       end
 
@@ -156,10 +171,6 @@ module Segment
       end
 
       describe '#group' do
-        after do
-          client.flush
-        end
-
         it 'errors without group_id' do
           expect { client.group :user_id => 'foo' }.to raise_error(ArgumentError)
         end
@@ -183,19 +194,24 @@ module Segment
             :traits => {
               :time => Time.utc(2013),
               :time_with_zone =>  Time.zone.parse('2013-01-01'),
-              :date_time => DateTime.new(2013,1,1),
-              :date => Date.new(2013,1,1),
+              :date_time => DateTime.new(2013, 1, 1),
+              :date => Date.new(2013, 1, 1),
               :nottime => 'x'
             }
           })
 
           message = queue.pop
+          traits = message[:traits]
 
-          expect(message[:traits][:time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:time_with_zone]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:date_time]).to eq('2013-01-01T00:00:00.000Z')
-          expect(message[:traits][:date]).to eq('2013-01-01')
-          expect(message[:traits][:nottime]).to eq('x')
+          date_time = DateTime.new(2013, 1, 1)
+          expect(Time.iso8601(traits[:time])).to eq(date_time)
+          expect(Time.iso8601(traits[:time_with_zone])).to eq(date_time)
+          expect(Time.iso8601(traits[:date_time])).to eq(date_time)
+
+          date = Date.new(2013, 1, 1)
+          expect(Date.iso8601(traits[:date])).to eq(date)
+
+          expect(traits[:nottime]).to eq('x')
         end
       end
 
@@ -208,10 +224,12 @@ module Segment
           expect { client.page Queued::PAGE }.to_not raise_error
         end
 
-        it 'does not error with the required options as strings' do
-          expect do
-            client.page Utils.stringify_keys(Queued::PAGE)
-          end.to_not raise_error
+        it 'accepts name' do
+          client.page :name => 'foo', :user_id => 1234
+
+          message = queue.pop
+          expect(message[:userId]).to eq(1234)
+          expect(message[:name]).to eq('foo')
         end
       end
 
@@ -232,39 +250,67 @@ module Segment
       end
 
       describe '#flush' do
-        it 'waits for the queue to finish on a flush' do
-          client.identify Queued::IDENTIFY
-          client.track Queued::TRACK
-          client.flush
+        let(:client_with_worker) {
+          Client.new(:write_key => WRITE_KEY).tap { |client|
+            queue = client.instance_variable_get(:@queue)
+            client.instance_variable_set(:@worker, DummyWorker.new(queue))
+          }
+        }
 
-          expect(client.queued_messages).to eq(0)
+        it 'waits for the queue to finish on a flush' do
+          client_with_worker.identify Queued::IDENTIFY
+          client_with_worker.track Queued::TRACK
+          client_with_worker.flush
+
+          expect(client_with_worker.queued_messages).to eq(0)
         end
 
-        it 'completes when the process forks' do
-          client.identify Queued::IDENTIFY
+        unless defined? JRUBY_VERSION
+          it 'completes when the process forks' do
+            client_with_worker.identify Queued::IDENTIFY
 
-          Process.fork do
-            client.track Queued::TRACK
-            client.flush
-            expect(client.queued_messages).to eq(0)
+            Process.fork do
+              client_with_worker.track Queued::TRACK
+              client_with_worker.flush
+              expect(client_with_worker.queued_messages).to eq(0)
+            end
+
+            Process.wait
           end
-
-          Process.wait
-        end unless defined? JRUBY_VERSION
+        end
       end
 
       context 'common' do
         check_property = proc { |msg, k, v| msg[k] && msg[k] == v }
 
-        let(:data) { { :user_id => 1, :group_id => 2, :previous_id => 3, :anonymous_id => 4, :event => "coco barked", :name => "coco" } }
+        let(:data) { { :user_id => 1, :group_id => 2, :previous_id => 3, :anonymous_id => 4, :message_id => 5, :event => 'coco barked', :name => 'coco' } }
 
         it 'does not convert ids given as fixnums to strings' do
-          [:track, :screen, :page, :identify].each do |s|
+          %i[track screen page identify].each do |s|
             client.send(s, data)
             message = queue.pop(true)
 
             expect(check_property.call(message, :userId, 1)).to eq(true)
             expect(check_property.call(message, :anonymousId, 4)).to eq(true)
+          end
+        end
+
+        it 'returns false if queue is full' do
+          client.instance_variable_set(:@max_queue_size, 1)
+
+          %i[track screen page group identify alias].each do |s|
+            expect(client.send(s, data)).to eq(true)
+            expect(client.send(s, data)).to eq(false) # Queue is full
+            queue.pop(true)
+          end
+        end
+
+        it 'converts message id to string' do
+          %i[track screen page group identify alias].each do |s|
+            client.send(s, data)
+            message = queue.pop(true)
+
+            expect(check_property.call(message, :messageId, '5')).to eq(true)
           end
         end
 
@@ -289,8 +335,8 @@ module Segment
         end
 
         it 'sends integrations' do
-          [:track, :screen, :page, :group, :identify, :alias].each do |s|
-            client.send s, :integrations => { :All => true, :Salesforce => false }, :user_id => 1, :group_id => 2, :previous_id => 3, :anonymous_id => 4, :event => "coco barked", :name => "coco"
+          %i[track screen page group identify alias].each do |s|
+            client.send s, :integrations => { :All => true, :Salesforce => false }, :user_id => 1, :group_id => 2, :previous_id => 3, :anonymous_id => 4, :event => 'coco barked', :name => 'coco'
             message = queue.pop(true)
             expect(message[:integrations][:All]).to eq(true)
             expect(message[:integrations][:Salesforce]).to eq(false)

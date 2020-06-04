@@ -1,39 +1,41 @@
 require 'thread'
 require 'time'
+
+require 'segment/analytics/defaults'
+require 'segment/analytics/logging'
 require 'segment/analytics/utils'
 require 'segment/analytics/worker'
-require 'segment/analytics/defaults'
 
 module Segment
   class Analytics
     class Client
       include Segment::Analytics::Utils
+      include Segment::Analytics::Logging
 
-      # public: Creates a new client
-      #
-      # attrs - Hash
-      #           :app_id         - String of your project's app_id
-      #           :max_queue_size - Fixnum of the max calls to remain queued (optional)
-      #           :on_error       - Proc which handles error calls from the API
-      def initialize attrs = {}
-        symbolize_keys! attrs
+      # @param [Hash] opts
+      # @option opts [String] :write_key Your project's write_key
+      # @option opts [FixNum] :max_queue_size Maximum number of calls to be
+      #   remain queued.
+      # @option opts [Proc] :on_error Handles error calls from the API.
+      def initialize(opts = {})
+        symbolize_keys!(opts)
 
         @queue = Queue.new
-        @app_id = attrs[:app_id]
-        @max_queue_size = attrs[:max_queue_size] || Defaults::Queue::MAX_SIZE
-        @options = attrs
+        @write_key = opts[:write_key]
+        @max_queue_size = opts[:max_queue_size] || Defaults::Queue::MAX_SIZE
         @worker_mutex = Mutex.new
-        @worker = Worker.new @queue, @app_id, @options
+        @worker = Worker.new(@queue, @write_key, opts)
+        @worker_thread = nil
 
         check_app_id!
 
         at_exit { @worker_thread && @worker_thread[:should_exit] = true }
       end
 
-      # public: Synchronously waits until the worker has flushed the queue.
-      #         Use only for scripts which are not long-running, and will
-      #         specifically exit
+      # Synchronously waits until the worker has flushed the queue.
       #
+      # Use only for scripts which are not long-running, and will specifically
+      # exit
       def flush
         while !@queue.empty? || @worker.is_requesting?
           ensure_worker_running
@@ -41,242 +43,102 @@ module Segment
         end
       end
 
-      # public: Tracks an event
+      # @!macro common_attrs
+      #   @option attrs [String] :anonymous_id ID for a user when you don't know
+      #     who they are yet. (optional but you must provide either an
+      #     `anonymous_id` or `user_id`)
+      #   @option attrs [Hash] :context ({})
+      #   @option attrs [Hash] :integrations What integrations this event
+      #     goes to (optional)
+      #   @option attrs [String] :message_id ID that uniquely
+      #     identifies a message across the API. (optional)
+      #   @option attrs [Time] :timestamp When the event occurred (optional)
+      #   @option attrs [String] :user_id The ID for this user in your database
+      #     (optional but you must provide either an `anonymous_id` or `user_id`)
+      #   @option attrs [Hash] :options Options such as user traits (optional)
+
+      # Tracks an event
       #
-      # attrs - Hash
-      #           :anonymous_id - String of the user's id when you don't know who they are yet. (optional but you must provide either an anonymous_id or user_id. See: https://segment.io/docs/tracking - api/track/#user - id)
-      #           :context      - Hash of context. (optional)
-      #           :event        - String of event name.
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :properties   - Hash of event properties. (optional)
-      #           :timestamp    - Time of when the event occurred. (optional)
-      #           :user_id      - String of the user id.
-      def track attrs
+      # @see https://segment.com/docs/sources/server/ruby/#track
+      #
+      # @param [Hash] attrs
+      #
+      # @option attrs [String] :event Event name
+      # @option attrs [Hash] :properties Event properties (optional)
+      # @macro common_attrs
+      def track(attrs)
         symbolize_keys! attrs
-        check_user_id! attrs
-
-        event = attrs[:event]
-        properties = attrs[:properties] || {}
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        check_timestamp! timestamp
-
-        if event.nil? || event.empty?
-          fail ArgumentError, 'Must supply event as a non-empty string'
-        end
-
-        fail ArgumentError, 'Properties must be a Hash' unless properties.is_a? Hash
-        isoify_dates! properties
-
-        add_context context
-
-        enqueue({
-          :event => event,
-          :userId => attrs[:user_id],
-          :anonymousId => attrs[:anonymous_id],
-          :context =>  context,
-          :options => attrs[:options],
-          :integrations => attrs[:integrations],
-          :properties => properties,
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'track'
-        })
+        enqueue(FieldParser.parse_for_track(attrs))
       end
 
-      # public: Identifies a user
+      # Identifies a user
       #
-      # attrs - Hash
-      #           :anonymous_id - String of the user's id when you don't know who they are yet. (optional but you must provide either an anonymous_id or user_id. See: https://segment.io/docs/tracking - api/track/#user - id)
-      #           :context      - Hash of context. (optional)
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :timestamp    - Time of when the event occurred. (optional)
-      #           :traits       - Hash of user traits. (optional)
-      #           :user_id      - String of the user id
-      def identify attrs
+      # @see https://segment.com/docs/sources/server/ruby/#identify
+      #
+      # @param [Hash] attrs
+      #
+      # @option attrs [Hash] :traits User traits (optional)
+      # @macro common_attrs
+      def identify(attrs)
         symbolize_keys! attrs
-        check_user_id! attrs
-
-        traits = attrs[:traits] || {}
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        check_timestamp! timestamp
-
-        fail ArgumentError, 'Must supply traits as a hash' unless traits.is_a? Hash
-        isoify_dates! traits
-
-        add_context context
-
-        enqueue({
-          :userId => attrs[:user_id],
-          :anonymousId => attrs[:anonymous_id],
-          :integrations => attrs[:integrations],
-          :context => context,
-          :traits => traits,
-          :options => attrs[:options],
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'identify'
-        })
+        enqueue(FieldParser.parse_for_identify(attrs))
       end
 
-      # public: Aliases a user from one id to another
+      # Aliases a user from one id to another
       #
-      # attrs - Hash
-      #           :context     - Hash of context (optional)
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :previous_id - String of the id to alias from
-      #           :timestamp   - Time of when the alias occured (optional)
-      #           :user_id     - String of the id to alias to
+      # @see https://segment.com/docs/sources/server/ruby/#alias
+      #
+      # @param [Hash] attrs
+      #
+      # @option attrs [String] :previous_id The ID to alias from
+      # @macro common_attrs
       def alias(attrs)
         symbolize_keys! attrs
-
-        from = attrs[:previous_id]
-        to = attrs[:user_id]
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        check_presence! from, 'previous_id'
-        check_presence! to, 'user_id'
-        check_timestamp! timestamp
-        add_context context
-
-        enqueue({
-          :previousId => from,
-          :userId => to,
-          :integrations => attrs[:integrations],
-          :context => context,
-          :options => attrs[:options],
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'alias'
-        })
+        enqueue(FieldParser.parse_for_alias(attrs))
       end
 
-      # public: Associates a user identity with a group.
+      # Associates a user identity with a group.
       #
-      # attrs - Hash
-      #           :context      - Hash of context (optional)
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :previous_id  - String of the id to alias from
-      #           :timestamp    - Time of when the alias occured (optional)
-      #           :user_id      - String of the id to alias to
+      # @see https://segment.com/docs/sources/server/ruby/#group
+      #
+      # @param [Hash] attrs
+      #
+      # @option attrs [String] :group_id The ID of the group
+      # @option attrs [Hash] :traits User traits (optional)
+      # @macro common_attrs
       def group(attrs)
         symbolize_keys! attrs
-        check_user_id! attrs
-
-        group_id = attrs[:group_id]
-        user_id = attrs[:user_id]
-        traits = attrs[:traits] || {}
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        fail ArgumentError, '.traits must be a hash' unless traits.is_a? Hash
-        isoify_dates! traits
-
-        check_presence! group_id, 'group_id'
-        check_timestamp! timestamp
-        add_context context
-
-        enqueue({
-          :groupId => group_id,
-          :userId => user_id,
-          :traits => traits,
-          :integrations => attrs[:integrations],
-          :options => attrs[:options],
-          :context => context,
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'group'
-        })
+        enqueue(FieldParser.parse_for_group(attrs))
       end
 
-      # public: Records a page view
+      # Records a page view
       #
-      # attrs - Hash
-      #           :anonymous_id - String of the user's id when you don't know who they are yet. (optional but you must provide either an anonymous_id or user_id. See: https://segment.io/docs/tracking - api/track/#user - id)
-      #           :category     - String of the page category (optional)
-      #           :context      - Hash of context (optional)
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :name         - String name of the page
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :properties   - Hash of page properties (optional)
-      #           :timestamp    - Time of when the pageview occured (optional)
-      #           :user_id      - String of the id to alias from
+      # @see https://segment.com/docs/sources/server/ruby/#page
+      #
+      # @param [Hash] attrs
+      #
+      # @option attrs [String] :name Name of the page
+      # @option attrs [Hash] :properties Page properties (optional)
+      # @macro common_attrs
       def page(attrs)
         symbolize_keys! attrs
-        check_user_id! attrs
-
-        name = attrs[:name].to_s
-        properties = attrs[:properties] || {}
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        fail ArgumentError, '.properties must be a hash' unless properties.is_a? Hash
-        isoify_dates! properties
-
-        check_timestamp! timestamp
-        add_context context
-
-        enqueue({
-          :userId => attrs[:user_id],
-          :anonymousId => attrs[:anonymous_id],
-          :name => name,
-          :category => attrs[:category],
-          :properties => properties,
-          :integrations => attrs[:integrations],
-          :options => attrs[:options],
-          :context => context,
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'page'
-        })
+        enqueue(FieldParser.parse_for_page(attrs))
       end
-      # public: Records a screen view (for a mobile app)
+
+      # Records a screen view (for a mobile app)
       #
-      # attrs - Hash
-      #           :anonymous_id - String of the user's id when you don't know who they are yet. (optional but you must provide either an anonymous_id or user_id. See: https://segment.io/docs/tracking - api/track/#user - id)
-      #           :category     - String screen category (optional)
-      #           :context      - Hash of context (optional)
-      #           :integrations - Hash specifying what integrations this event goes to. (optional)
-      #           :name         - String name of the screen
-      #           :options      - Hash specifying options such as user traits. (optional)
-      #           :properties   - Hash of screen properties (optional)
-      #           :timestamp    - Time of when the screen occured (optional)
-      #           :user_id      - String of the id to alias from
+      # @param [Hash] attrs
+      #
+      # @option attrs [String] :name Name of the screen
+      # @option attrs [Hash] :properties Screen properties (optional)
+      # @option attrs [String] :category The screen category (optional)
+      # @macro common_attrs
       def screen(attrs)
         symbolize_keys! attrs
-        check_user_id! attrs
-
-        name = attrs[:name].to_s
-        properties = attrs[:properties] || {}
-        timestamp = attrs[:timestamp] || Time.new
-        context = attrs[:context] || {}
-
-        fail ArgumentError, '.properties must be a hash' unless properties.is_a? Hash
-        isoify_dates! properties
-
-        check_timestamp! timestamp
-        add_context context
-
-        enqueue({
-          :userId => attrs[:user_id],
-          :anonymousId => attrs[:anonymous_id],
-          :name => name,
-          :properties => properties,
-          :category => attrs[:category],
-          :options => attrs[:options],
-          :integrations => attrs[:integrations],
-          :context => context,
-          :timestamp => timestamp.iso8601,
-          :type => 'screen'
-        })
+        enqueue(FieldParser.parse_for_screen(attrs))
       end
 
-      # public: Returns the number of queued messages
-      #
-      # returns Fixnum of messages in the queue
+      # @return [Fixnum] number of messages in the queue
       def queued_messages
         @queue.length
       end
@@ -288,57 +150,26 @@ module Segment
       # returns Boolean of whether the item was added to the queue.
       def enqueue(action)
         # add our request id for tracing purposes
-        action[:messageId] = uid
-        unless queue_full = @queue.length >= @max_queue_size
-          ensure_worker_running
+        action[:messageId] ||= uid
+
+        if @queue.length < @max_queue_size
           @queue << action
-        end
-        !queue_full
-      end
+          ensure_worker_running
 
-      # private: Ensures that a string is non-empty
-      #
-      # obj    - String|Number that must be non-blank
-      # name   - Name of the validated value
-      #
-      def check_presence!(obj, name)
-        if obj.nil? || (obj.is_a?(String) && obj.empty?)
-          fail ArgumentError, "#{name} must be given"
+          true
+        else
+          logger.warn(
+            'Queue is full, dropping events. The :max_queue_size ' \
+            'configuration parameter can be increased to prevent this from ' \
+            'happening.'
+          )
+          false
         end
       end
 
-      # private: Adds contextual information to the call
-      #
-      # context - Hash of call context
-      def add_context(context)
-        context[:library] =  { :name => "analytics-ruby", :version => Segment::Analytics::VERSION.to_s }
-      end
-
-      # private: Checks that the app_id is properly initialized
-      def check_app_id!
-        fail ArgumentError, 'App id must be initialized' if @app_id.nil?
-      end
-
-      # private: Checks the timstamp option to make sure it is a Time.
-      def check_timestamp!(timestamp)
-        fail ArgumentError, 'Timestamp must be a Time' unless timestamp.is_a? Time
-      end
-
-      def event attrs
-        symbolize_keys! attrs
-
-        {
-          :userId => user_id,
-          :name => name,
-          :properties => properties,
-          :context => context,
-          :timestamp => datetime_in_iso8601(timestamp),
-          :type => 'screen'
-        }
-      end
-
-      def check_user_id! attrs
-        fail ArgumentError, 'Must supply either user_id or anonymous_id' unless attrs[:user_id] || attrs[:anonymous_id]
+      # private: Checks that the write_key is properly initialized
+      def check_write_key!
+        raise ArgumentError, 'Write key must be initialized' if @write_key.nil?
       end
 
       def ensure_worker_running
