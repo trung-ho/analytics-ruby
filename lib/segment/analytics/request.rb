@@ -44,7 +44,7 @@ module Segment
           payload = JSON.generate :sentAt => datetime_in_iso8601(Time.new), :batch => batch
           request = Net::HTTP::Post.new(@path, headers)
           request.basic_auth app_id, nil
-
+          byebug
           if self.class.stub
             status = 200
             error = nil
